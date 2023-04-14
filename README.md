@@ -1,0 +1,2 @@
+# Vim
+VimScript, VimSnippets, VimHelp
