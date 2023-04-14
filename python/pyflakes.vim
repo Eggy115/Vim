@@ -1,52 +1,56 @@
-"============================================================================
-"File:        pyflakes.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Authors:     Martin Grenfell <martin.grenfell@gmail.com>
-"             kstep <me@kstep.me>
-"             Parantapa Bhattacharya <parantapa@gmail.com>
-"
-"============================================================================
-if exists("g:loaded_syntastic_python_pyflakes_checker")
-    finish
-endif
-let g:loaded_syntastic_python_pyflakes_checker=1
+" Author: w0rp <devw0rp@gmail.com>
+" Description: pyflakes for python files
 
-function! SyntaxCheckers_python_pyflakes_IsAvailable()
-    return executable('pyflakes')
-endfunction
+call ale#Set('python_pyflakes_executable', 'pyflakes')
+call ale#Set('python_pyflakes_use_global', get(g:, 'ale_use_global_executables', 0))
+call ale#Set('python_pyflakes_auto_pipenv', 0)
+call ale#Set('python_pyflakes_auto_poetry', 0)
 
-function! SyntaxCheckers_python_pyflakes_GetHighlightRegex(i)
-    if match(a:i['text'], 'is assigned to but never used') > -1
-                \ || match(a:i['text'], 'imported but unused') > -1
-                \ || match(a:i['text'], 'undefined name') > -1
-                \ || match(a:i['text'], 'redefinition of') > -1
-                \ || match(a:i['text'], 'referenced before assignment') > -1
-                \ || match(a:i['text'], 'duplicate argument') > -1
-                \ || match(a:i['text'], 'after other statements') > -1
-                \ || match(a:i['text'], 'shadowed by loop variable') > -1
-
-        let term = split(a:i['text'], "'", 1)[1]
-        return '\V\<'.term.'\>'
+function! ale_linters#python#pyflakes#GetExecutable(buffer) abort
+    if (ale#Var(a:buffer, 'python_auto_pipenv') || ale#Var(a:buffer, 'python_pyflakes_auto_pipenv'))
+    \ && ale#python#PipenvPresent(a:buffer)
+        return 'pipenv'
     endif
-    return ''
+
+    if (ale#Var(a:buffer, 'python_auto_poetry') || ale#Var(a:buffer, 'python_pyflakes_auto_poetry'))
+    \ && ale#python#PoetryPresent(a:buffer)
+        return 'poetry'
+    endif
+
+    return ale#python#FindExecutable(a:buffer, 'python_pyflakes', ['pyflakes'])
 endfunction
 
-function! SyntaxCheckers_python_pyflakes_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'pyflakes',
-                \ 'subchecker': 'pyflakes' })
-    let errorformat =
-        \ '%E%f:%l: could not compile,'.
-        \ '%-Z%p^,'.
-        \ '%E%f:%l:%c: %m,'.
-        \ '%E%f:%l: %m,'.
-        \ '%-G%.%#'
+function! ale_linters#python#pyflakes#GetCommand(buffer) abort
+    let l:executable = ale_linters#python#pyflakes#GetExecutable(a:buffer)
 
-    return SyntasticMake({ 'makeprg': makeprg,
-                         \ 'errorformat': errorformat,
-                         \ 'defaults': {'text': "Syntax error"} })
+    let l:exec_args = l:executable =~? 'pipenv\|poetry$'
+    \   ? ' run pyflakes'
+    \   : ''
+
+    return ale#Escape(l:executable)
+    \   . l:exec_args
+    \   . ' %t'
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'python',
-    \ 'name': 'pyflakes'})
+function! ale_linters#python#pyflakes#Handle(buffer, lines) abort
+    let l:pattern = '\v^[a-zA-Z]?:?[^:]+:(\d+):(\d+)?:? (.+)$'
+    let l:output = []
+
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        call add(l:output, {
+        \   'lnum': l:match[1] + 0,
+        \   'col': l:match[2] + 0,
+        \   'text': l:match[3],
+        \})
+    endfor
+
+    return l:output
+endfunction
+
+call ale#linter#Define('python', {
+\   'name': 'pyflakes',
+\   'executable': function('ale_linters#python#pyflakes#GetExecutable'),
+\   'command': function('ale_linters#python#pyflakes#GetCommand'),
+\   'callback': 'ale_linters#python#pyflakes#Handle',
+\   'output_stream': 'both',
+\})

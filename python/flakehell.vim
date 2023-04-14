@@ -1,51 +1,51 @@
 " Author: w0rp <devw0rp@gmail.com>
-" Description: flake8 for python files
+" Description: flakehell for python files
 
-call ale#Set('python_flake8_executable', 'flake8')
-call ale#Set('python_flake8_options', '')
-call ale#Set('python_flake8_use_global', get(g:, 'ale_use_global_executables', 0))
-call ale#Set('python_flake8_change_directory', 'project')
-call ale#Set('python_flake8_auto_pipenv', 0)
-call ale#Set('python_flake8_auto_poetry', 0)
+call ale#Set('python_flakehell_executable', 'flakehell')
+call ale#Set('python_flakehell_options', '')
+call ale#Set('python_flakehell_use_global', get(g:, 'ale_use_global_executables', 0))
+call ale#Set('python_flakehell_change_directory', 'project')
+call ale#Set('python_flakehell_auto_pipenv', 0)
+call ale#Set('python_flakehell_auto_poetry', 0)
 
 function! s:UsingModule(buffer) abort
-    return ale#Var(a:buffer, 'python_flake8_options') =~# ' *-m flake8'
+    return ale#Var(a:buffer, 'python_flakehell_executable') is? 'python'
 endfunction
 
-function! ale_linters#python#flake8#GetExecutable(buffer) abort
-    if (ale#Var(a:buffer, 'python_auto_pipenv') || ale#Var(a:buffer, 'python_flake8_auto_pipenv'))
+function! ale_linters#python#flakehell#GetExecutable(buffer) abort
+    if (ale#Var(a:buffer, 'python_auto_pipenv') || ale#Var(a:buffer, 'python_flakehell_auto_pipenv'))
     \ && ale#python#PipenvPresent(a:buffer)
         return 'pipenv'
     endif
 
-    if (ale#Var(a:buffer, 'python_auto_poetry') || ale#Var(a:buffer, 'python_flake8_auto_poetry'))
+    if (ale#Var(a:buffer, 'python_auto_poetry') || ale#Var(a:buffer, 'python_flakehell_auto_poetry'))
     \ && ale#python#PoetryPresent(a:buffer)
         return 'poetry'
     endif
 
     if !s:UsingModule(a:buffer)
-        return ale#python#FindExecutable(a:buffer, 'python_flake8', ['flake8'])
+        return ale#python#FindExecutable(a:buffer, 'python_flakehell', ['flakehell'])
     endif
 
-    return ale#Var(a:buffer, 'python_flake8_executable')
+    return ale#Var(a:buffer, 'python_flakehell_executable')
 endfunction
 
-function! ale_linters#python#flake8#RunWithVersionCheck(buffer) abort
-    let l:executable = ale_linters#python#flake8#GetExecutable(a:buffer)
+function! ale_linters#python#flakehell#RunWithVersionCheck(buffer) abort
+    let l:executable = ale_linters#python#flakehell#GetExecutable(a:buffer)
 
-    let l:module_string = s:UsingModule(a:buffer) ? ' -m flake8' : ''
+    let l:module_string = s:UsingModule(a:buffer) ? ' -m flakehell' : ''
     let l:command = ale#Escape(l:executable) . l:module_string . ' --version'
 
     return ale#semver#RunWithVersionCheck(
     \   a:buffer,
     \   l:executable,
     \   l:command,
-    \   function('ale_linters#python#flake8#GetCommand'),
+    \   function('ale_linters#python#flakehell#GetCommand'),
     \)
 endfunction
 
-function! ale_linters#python#flake8#GetCwd(buffer) abort
-    let l:change_directory = ale#Var(a:buffer, 'python_flake8_change_directory')
+function! ale_linters#python#flakehell#GetCwd(buffer) abort
+    let l:change_directory = ale#Var(a:buffer, 'python_flakehell_change_directory')
     let l:cwd = ''
 
     if l:change_directory is# 'project'
@@ -65,23 +65,28 @@ function! ale_linters#python#flake8#GetCwd(buffer) abort
     return l:cwd
 endfunction
 
-function! ale_linters#python#flake8#GetCommand(buffer, version) abort
-    let l:executable = ale_linters#python#flake8#GetExecutable(a:buffer)
+function! ale_linters#python#flakehell#GetCommand(buffer, version) abort
+    let l:executable = ale_linters#python#flakehell#GetExecutable(a:buffer)
 
-    let l:exec_args = l:executable =~? 'pipenv\|poetry$'
-    \   ? ' run flake8'
-    \   : ''
+    if (l:executable =~? 'pipenv\|poetry$')
+        let l:exec_args = ' run flakehell'
+    elseif (l:executable is? 'python')
+        let l:exec_args = ' -m flakehell'
+    else
+        let l:exec_args = ''
+    endif
 
     " Only include the --stdin-display-name argument if we can parse the
-    " flake8 version, and it is recent enough to support it.
-    let l:display_name_args = ale#semver#GTE(a:version, [3, 0, 0])
+    " flakehell version, and it is recent enough to support it.
+    let l:display_name_args = ale#semver#GTE(a:version, [0, 8, 0])
     \   ? ' --stdin-display-name %s'
     \   : ''
 
-    let l:options = ale#Var(a:buffer, 'python_flake8_options')
+    let l:options = ale#Var(a:buffer, 'python_flakehell_options')
 
-    return ale#Escape(l:executable) . l:exec_args
-    \   . (!empty(l:options) ? ' ' . l:options : '')
+    return ale#Escape(l:executable)
+    \   . l:exec_args
+    \   . (!empty(l:options) ? ' lint ' . l:options : ' lint')
     \   . ' --format=default'
     \   . l:display_name_args . ' -'
 endfunction
@@ -93,7 +98,7 @@ let s:end_col_pattern_map = {
 \   'F841': 'local variable ''\([^'']\+\)''',
 \}
 
-function! ale_linters#python#flake8#Handle(buffer, lines) abort
+function! ale_linters#python#flakehell#Handle(buffer, lines) abort
     let l:output = ale#python#HandleTraceback(a:lines, 10)
 
     if !empty(l:output)
@@ -162,9 +167,9 @@ function! ale_linters#python#flake8#Handle(buffer, lines) abort
 endfunction
 
 call ale#linter#Define('python', {
-\   'name': 'flake8',
-\   'executable': function('ale_linters#python#flake8#GetExecutable'),
-\   'cwd': function('ale_linters#python#flake8#GetCwd'),
-\   'command': function('ale_linters#python#flake8#RunWithVersionCheck'),
-\   'callback': 'ale_linters#python#flake8#Handle',
+\   'name': 'flakehell',
+\   'executable': function('ale_linters#python#flakehell#GetExecutable'),
+\   'cwd': function('ale_linters#python#flakehell#GetCwd'),
+\   'command': function('ale_linters#python#flakehell#RunWithVersionCheck'),
+\   'callback': 'ale_linters#python#flakehell#Handle',
 \})

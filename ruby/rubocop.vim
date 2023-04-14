@@ -1,52 +1,31 @@
-"============================================================================
-"File:        rubocop.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Recai Oktaş <roktas@bil.omu.edu.tr>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
-"
-" In order to use rubocop with the default ruby checker (mri):
-"     let g:syntastic_ruby_checkers = ['mri', 'rubocop']
+" Author: ynonp - https://github.com/ynonp, Eddie Lebow https://github.com/elebow
+" Description: RuboCop, a code style analyzer for Ruby files
 
-if exists("g:loaded_syntastic_ruby_rubocop_checker")
-    finish
-endif
-let g:loaded_syntastic_ruby_rubocop_checker=1
+call ale#Set('ruby_rubocop_executable', 'rubocop')
+call ale#Set('ruby_rubocop_options', '')
 
-function! SyntaxCheckers_ruby_rubocop_IsAvailable()
-    return executable('rubocop')
+function! ale_linters#ruby#rubocop#GetCommand(buffer) abort
+    let l:executable = ale#Var(a:buffer, 'ruby_rubocop_executable')
+
+    return ale#ruby#EscapeExecutable(l:executable, 'rubocop')
+    \   . ' --format json --force-exclusion '
+    \   . ale#Var(a:buffer, 'ruby_rubocop_options')
+    \   . ' --stdin %s'
 endfunction
 
-function! SyntaxCheckers_ruby_rubocop_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'rubocop',
-                \ 'args': '--emacs --silent',
-                \ 'subchecker': 'rubocop' })
+function! ale_linters#ruby#rubocop#GetType(severity) abort
+    if a:severity is? 'convention'
+    \|| a:severity is? 'warning'
+    \|| a:severity is? 'refactor'
+        return 'W'
+    endif
 
-    let errorformat = '%f:%l:\ %t:\ %m'
-
-    let loclist = SyntasticMake({
-                \ 'makeprg': makeprg,
-                \ 'errorformat': errorformat,
-                \ 'subtype': 'Style'})
-
-    " convert rubocop severities to error types recognized by syntastic
-    for n in range(len(loclist))
-        if loclist[n]['type'] == 'F'
-            let loclist[n]['type'] = 'E'
-        elseif loclist[n]['type'] != 'W' && loclist[n]['type'] != 'E'
-            let loclist[n]['type'] = 'W'
-        endif
-    endfor
-
-    return loclist
+    return 'E'
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'ruby',
-    \ 'name': 'rubocop'})
+call ale#linter#Define('ruby', {
+\   'name': 'rubocop',
+\   'executable': {b -> ale#Var(b, 'ruby_rubocop_executable')},
+\   'command': function('ale_linters#ruby#rubocop#GetCommand'),
+\   'callback': 'ale#ruby#HandleRubocopOutput',
+\})

@@ -1,39 +1,33 @@
-"============================================================================
-"File:        rust.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Chad Jablonski <chad.jablonski at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
+" Author: Daniel Schemala <istjanichtzufassen@gmail.com>
+" Description: rustc for rust files
 
-if exists("g:loaded_syntastic_rust_rustc_checker")
-    finish
-endif
-let g:loaded_syntastic_rust_rustc_checker=1
+call ale#Set('rust_rustc_options', '--emit=mir -o /dev/null')
 
-function! SyntaxCheckers_rust_rustc_IsAvailable()
-    return executable("rustc")
+function! ale_linters#rust#rustc#RustcCommand(buffer) abort
+    " Try to guess the library search path. If the project is managed by cargo,
+    " it's usually <project root>/target/debug/deps/ or
+    " <project root>/target/release/deps/
+    let l:cargo_file = ale#path#FindNearestFile(a:buffer, 'Cargo.toml')
+
+    if l:cargo_file isnot# ''
+        let l:root = fnamemodify(l:cargo_file, ':h')
+        let l:dependencies = ' -L ' . ale#Escape(ale#path#GetAbsPath(l:root, 'target/debug/deps'))
+        \   . ' -L ' . ale#Escape(ale#path#GetAbsPath(l:root, 'target/release/deps'))
+    else
+        let l:dependencies = ''
+    endif
+
+    let l:options = ale#Var(a:buffer, 'rust_rustc_options')
+
+    return 'rustc --error-format=json'
+    \   . (!empty(l:options) ? ' ' . l:options : '')
+    \   . l:dependencies . ' -'
 endfunction
 
-function! SyntaxCheckers_rust_rustc_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'rustc',
-                \ 'args': '--parse-only',
-                \ 'subchecker': 'rustc' })
-
-    let errorformat  =
-        \ '%E%f:%l:%c: \\d%#:\\d%# %.%\{-}error:%.%\{-} %m,'   .
-        \ '%W%f:%l:%c: \\d%#:\\d%# %.%\{-}warning:%.%\{-} %m,' .
-        \ '%C%f:%l %m,' .
-        \ '%-Z%.%#'
-
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat })
-endfunction
-
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'rust',
-    \ 'name': 'rustc'})
+call ale#linter#Define('rust', {
+\   'name': 'rustc',
+\   'executable': 'rustc',
+\   'command': function('ale_linters#rust#rustc#RustcCommand'),
+\   'callback': 'ale#handlers#rust#HandleRustErrors',
+\   'output_stream': 'stderr',
+\})
