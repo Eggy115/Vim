@@ -1,225 +1,286 @@
-" Vim script for checking .po files.
-"
-" Go through the file and verify that:
-" - All %...s items in "msgid" are identical to the ones in "msgstr".
-" - An error or warning code in "msgid" matches the one in "msgstr".
+source shared.vim
+source term_util.vim
 
-if 1	" Only execute this if the eval feature is available.
+command -nargs=1 MissingFeature throw 'Skipped: ' .. <args> .. ' feature missing'
 
-" Function to get a split line at the cursor.
-" Used for both msgid and msgstr lines.
-" Removes all text except % items and returns the result.
-func! GetMline()
-  let idline = substitute(getline('.'), '"\(.*\)"$', '\1', '')
-  while line('.') < line('$')
-    +
-    let line = getline('.')
-    if line[0] != '"'
-      break
-    endif
-    let idline .= substitute(line, '"\(.*\)"$', '\1', '')
-  endwhile
-
-  " remove '%', not used for formatting.
-  let idline = substitute(idline, "'%'", '', 'g')
-  let idline = substitute(idline, "%%", '', 'g')
-
-  " remove '%' used for plural forms.
-  let idline = substitute(idline, '\\nPlural-Forms: .\+;\\n', '', '')
-
-  " remove everything but % items.
-  return substitute(idline, '[^%]*\(%[-+ #''.0-9*]*l\=[dsuxXpoc%]\)\=', '\1', 'g')
+" Command to check for the presence of a feature.
+command -nargs=1 CheckFeature call CheckFeature(<f-args>)
+func CheckFeature(name)
+  if !has(a:name, 1)
+    throw 'Checking for non-existent feature ' .. a:name
+  endif
+  if !has(a:name)
+    MissingFeature a:name
+  endif
 endfunc
 
-" This only works when 'wrapscan' is not set.
-let s:save_wrapscan = &wrapscan
-set nowrapscan
-
-" Start at the first "msgid" line.
-let wsv = winsaveview()
-1
-keeppatterns /^msgid\>
-
-" When an error is detected this is set to the line number.
-" Note: this is used in the Makefile.
-let error = 0
-
-while 1
-  let lnum = line('.')
-  if getline(lnum) =~ 'msgid "Text;.*;"'
-    if getline(lnum + 1) !~ '^msgstr "\([^;]\+;\)\+"'
-      echomsg 'Mismatching ; in line ' . (lnum + 1)
-      echomsg 'Did you forget the trailing semicolon?'
-      if error == 0
-	let error = lnum + 1
-      endif
-    endif
+" Command to check for the absence of a feature.
+command -nargs=1 CheckNotFeature call CheckNotFeature(<f-args>)
+func CheckNotFeature(name)
+  if !has(a:name, 1)
+    throw 'Checking for non-existent feature ' .. a:name
   endif
-
-  if getline(line('.') - 1) !~ "no-c-format"
-    " go over the "msgid" and "msgid_plural" lines
-    let prevfromline = 'foobar'
-    while 1
-      let fromline = GetMline()
-      if prevfromline != 'foobar' && prevfromline != fromline
-	echomsg 'Mismatching % in line ' . (line('.') - 1)
-	echomsg 'msgid: ' . prevfromline
-	echomsg 'msgid ' . fromline
-	if error == 0
-	  let error = line('.')
-	endif
-      endif
-      if getline('.') !~ 'msgid_plural'
-	break
-      endif
-      let prevfromline = fromline
-    endwhile
-
-    if getline('.') !~ '^msgstr'
-      echomsg 'Missing "msgstr" in line ' . line('.')
-      if error == 0
-	let error = line('.')
-      endif
-    endif
-
-    " check all the 'msgstr' lines
-    while getline('.') =~ '^msgstr'
-      let toline = GetMline()
-      if fromline != toline
-	echomsg 'Mismatching % in line ' . (line('.') - 1)
-	echomsg 'msgid: ' . fromline
-	echomsg 'msgstr: ' . toline
-	if error == 0
-	  let error = line('.')
-	endif
-      endif
-      if line('.') == line('$')
-	break
-      endif
-    endwhile
+  if has(a:name)
+    throw 'Skipped: ' .. a:name .. ' feature present'
   endif
+endfunc
 
-  " Find next msgid.  Quit when there is no more.
-  let lnum = line('.')
-  silent! keeppatterns /^msgid\>
-  if line('.') == lnum
-    break
+" Command to check for the presence of a working option.
+command -nargs=1 CheckOption call CheckOption(<f-args>)
+func CheckOption(name)
+  if !exists('&' .. a:name)
+    throw 'Checking for non-existent option ' .. a:name
   endif
-endwhile
-
-" Check that error code in msgid matches the one in msgstr.
-"
-" Examples of mismatches found with msgid "E123: ..."
-" - msgstr "E321: ..."    error code mismatch
-" - msgstr "W123: ..."    warning instead of error
-" - msgstr "E123 ..."     missing colon
-" - msgstr "..."          missing error code
-"
-1
-if search('msgid "\("\n"\)\?\([EW][0-9]\+:\).*\nmsgstr "\("\n"\)\?[^"]\@=\2\@!') > 0
-  echomsg 'Mismatching error/warning code in line ' . line('.')
-  if error == 0
-    let error = line('.')
+  if !exists('+' .. a:name)
+    throw 'Skipped: ' .. a:name .. ' option not supported'
   endif
-endif
+endfunc
 
-func! CountNl(first, last)
-  let nl = 0
-  for lnum in range(a:first, a:last)
-    let nl += count(getline(lnum), "\n")
+" Command to check for the presence of a built-in function.
+command -nargs=1 CheckFunction call CheckFunction(<f-args>)
+func CheckFunction(name)
+  if !exists('?' .. a:name)
+    throw 'Checking for non-existent function ' .. a:name
+  endif
+  if !exists('*' .. a:name)
+    throw 'Skipped: ' .. a:name .. ' function missing'
+  endif
+endfunc
+
+" Command to check for the presence of an Ex command
+command -nargs=1 CheckCommand call CheckCommand(<f-args>)
+func CheckCommand(name)
+  if !exists(':' .. a:name)
+    throw 'Skipped: ' .. a:name .. ' command not supported'
+  endif
+endfunc
+
+" Command to check for the presence of a shell command
+command -nargs=1 CheckExecutable call CheckExecutable(<f-args>)
+func CheckExecutable(name)
+  if !executable(a:name)
+    throw 'Skipped: ' .. a:name .. ' program not executable'
+  endif
+endfunc
+
+" Command to check for the presence of python.  Argument should have been
+" obtained with PythonProg()
+func CheckPython(name)
+  if a:name == ''
+    throw 'Skipped: python command not available'
+  endif
+endfunc
+
+" Command to check for running on MS-Windows
+command CheckMSWindows call CheckMSWindows()
+func CheckMSWindows()
+  if !has('win32')
+    throw 'Skipped: only works on MS-Windows'
+  endif
+endfunc
+
+" Command to check for NOT running on MS-Windows
+command CheckNotMSWindows call CheckNotMSWindows()
+func CheckNotMSWindows()
+  if has('win32')
+    throw 'Skipped: does not work on MS-Windows'
+  endif
+endfunc
+
+" Command to check for running on Unix
+command CheckUnix call CheckUnix()
+func CheckUnix()
+  if !has('unix')
+    throw 'Skipped: only works on Unix'
+  endif
+endfunc
+
+" Command to check for running on Linux
+command CheckLinux call CheckLinux()
+func CheckLinux()
+  if !has('linux')
+    throw 'Skipped: only works on Linux'
+  endif
+endfunc
+
+" Command to check for not running on a BSD system.
+command CheckNotBSD call CheckNotBSD()
+func CheckNotBSD()
+  if has('bsd')
+    throw 'Skipped: does not work on BSD'
+  endif
+endfunc
+
+" Command to check for not running on a MacOS
+command CheckNotMac call CheckNotMac()
+func CheckNotMac()
+  if has('mac')
+    throw 'Skipped: does not work on MacOS'
+  endif
+endfunc
+
+" Command to check for not running on a MacOS M1 system.
+command CheckNotMacM1 call CheckNotMacM1()
+func CheckNotMacM1()
+  if has('mac') && system('uname -a') =~ '\<arm64\>'
+    throw 'Skipped: does not work on MacOS M1'
+  endif
+endfunc
+
+" Command to check that making screendumps is supported.
+" Caller must source screendump.vim
+command CheckScreendump call CheckScreendump()
+func CheckScreendump()
+  if !CanRunVimInTerminal()
+    throw 'Skipped: cannot make screendumps'
+  endif
+endfunc
+
+" Command to check that we can Run Vim in a terminal window
+command CheckRunVimInTerminal call CheckRunVimInTerminal()
+func CheckRunVimInTerminal()
+  if !CanRunVimInTerminal()
+    throw 'Skipped: cannot run Vim in a terminal window'
+  endif
+endfunc
+
+" Command to check that we can run the GUI
+command CheckCanRunGui call CheckCanRunGui()
+func CheckCanRunGui()
+  if !has('gui') || ($DISPLAY == "" && !has('gui_running'))
+    throw 'Skipped: cannot start the GUI'
+  endif
+endfunc
+
+" Command to Check for an environment variable
+command -nargs=1 CheckEnv call CheckEnv(<f-args>)
+func CheckEnv(name)
+  if empty(eval('$' .. a:name))
+    throw 'Skipped: Environment variable ' .. a:name .. ' is not set'
+  endif
+endfunc
+
+" Command to check that we are using the GUI
+command CheckGui call CheckGui()
+func CheckGui()
+  if !has('gui_running')
+    throw 'Skipped: only works in the GUI'
+  endif
+endfunc
+
+" Command to check that not currently using the GUI
+command CheckNotGui call CheckNotGui()
+func CheckNotGui()
+  if has('gui_running')
+    throw 'Skipped: only works in the terminal'
+  endif
+endfunc
+
+" Command to check that test is not running as root
+command CheckNotRoot call CheckNotRoot()
+func CheckNotRoot()
+  if IsRoot()
+    throw 'Skipped: cannot run test as root'
+  endif
+endfunc
+
+" Command to check that the current language is English
+command CheckEnglish call CheckEnglish()
+func CheckEnglish()
+  if v:lang != "C" && v:lang !~ '^[Ee]n'
+      throw 'Skipped: only works in English language environment'
+  endif
+endfunc
+
+" Command to check that loopback device has IPv6 address
+command CheckIPv6 call CheckIPv6()
+func CheckIPv6()
+  if !has('ipv6')
+    throw 'Skipped: cannot use IPv6 networking'
+  endif
+  if !exists('s:ipv6_loopback')
+    let s:ipv6_loopback = s:CheckIPv6Loopback()
+  endif
+  if !s:ipv6_loopback
+    throw 'Skipped: no IPv6 address for loopback device'
+  endif
+endfunc
+
+func s:CheckIPv6Loopback()
+  if has('win32')
+    return system('netsh interface ipv6 show interface') =~? '\<Loopback\>'
+  elseif filereadable('/proc/net/if_inet6')
+    return (match(readfile('/proc/net/if_inet6'), '\slo$') >= 0)
+  elseif executable('ifconfig')
+    for dev in ['lo0', 'lo', 'loop']
+      " NOTE: On SunOS, need specify address family 'inet6' to get IPv6 info.
+      if system('ifconfig ' .. dev .. ' inet6 2>/dev/null') =~? '\<inet6\>'
+            \ || system('ifconfig ' .. dev .. ' 2>/dev/null') =~? '\<inet6\>'
+        return v:true
+      endif
+    endfor
+  else
+    " TODO: How to check it in other platforms?
+  endif
+  return v:false
+endfunc
+
+" Command to check for not running under ASAN
+command CheckNotAsan call CheckNotAsan()
+func CheckNotAsan()
+  if execute('version') =~# '-fsanitize=[a-z,]*\<address\>'
+    throw 'Skipped: does not work with ASAN'
+  endif
+endfunc
+
+" Command to check for not running under valgrind
+command CheckNotValgrind call CheckNotValgrind()
+func CheckNotValgrind()
+  if RunningWithValgrind()
+    throw 'Skipped: does not work well with valgrind'
+  endif
+endfunc
+
+" Command to check for X11 based GUI
+command CheckX11BasedGui call CheckX11BasedGui()
+func CheckX11BasedGui()
+  if !g:x11_based_gui
+    throw 'Skipped: requires X11 based GUI'
+  endif
+endfunc
+
+" Command to check that there are two clipboards
+command CheckTwoClipboards call CheckTwoClipboards()
+func CheckTwoClipboards()
+  " avoid changing the clipboard here, only X11 supports both
+  if !has('X11')
+    throw 'Skipped: requires two clipboards'
+  endif
+endfunc
+
+" Command to check for satisfying any of the conditions.
+" e.g. CheckAnyOf Feature:bsd Feature:sun Linux
+command -nargs=+ CheckAnyOf call CheckAnyOf(<f-args>)
+func CheckAnyOf(...)
+  let excp = []
+  for arg in a:000
+    try
+      exe 'Check' .. substitute(arg, ':', ' ', '')
+      return
+    catch /^Skipped:/
+      let excp += [substitute(v:exception, '^Skipped:\s*', '', '')]
+    endtry
   endfor
-  return nl
+  throw 'Skipped: ' .. join(excp, '; ')
 endfunc
 
-" Check that the \n at the end of the msgid line is also present in the msgstr
-" line.  Skip over the header.
-1
-keeppatterns /^"MIME-Version:
-while 1
-  let lnum = search('^msgid\>')
-  if lnum <= 0
-    break
-  endif
-  let strlnum = search('^msgstr\>')
-  let end = search('^$')
-  if end <= 0
-    let end = line('$') + 1
-  endif
-  let origcount = CountNl(lnum, strlnum - 1)
-  let transcount = CountNl(strlnum, end - 1)
-  " Allow for a few more or less line breaks when there are 2 or more
-  if origcount != transcount && (origcount <= 2 || transcount <= 2)
-    echomsg 'Mismatching "\n" in line ' . line('.')
-    if error == 0
-      let error = lnum
-    endif
-  endif
-endwhile
+" Command to check for satisfying all of the conditions.
+" e.g. CheckAllOf Unix Gui Option:ballooneval
+command -nargs=+ CheckAllOf call CheckAllOf(<f-args>)
+func CheckAllOf(...)
+  for arg in a:000
+    exe 'Check' .. substitute(arg, ':', ' ', '')
+  endfor
+endfunc
 
-" Check that the file is well formed according to msgfmts understanding
-if executable("msgfmt")
-  let filename = expand("%")
-  " Newer msgfmt does not take OLD_PO_FILE_INPUT argument, must be in
-  " environment.
-  let $OLD_PO_FILE_INPUT = 'yes'
-  let a = system("msgfmt --statistics " . filename)
-  if v:shell_error != 0
-    let error = matchstr(a, filename.':\zs\d\+\ze:')+0
-    for line in split(a, '\n') | echomsg line | endfor
-  endif
-endif
-
-" Check that the plural form is properly initialized
-1
-let plural = search('^msgid_plural ', 'n')
-if (plural && search('^"Plural-Forms: ', 'n') == 0) || (plural && search('^msgstr\[0\] ".\+"', 'n') != plural + 1)
-  if search('^"Plural-Forms: ', 'n') == 0
-    echomsg "Missing Plural header"
-    if error == 0
-      let error = search('\(^"[A-Za-z-_]\+: .*\\n"\n\)\+\zs', 'n') - 1
-    endif
-  elseif error == 0
-    let error = plural
-  endif
-elseif !plural && search('^"Plural-Forms: ', 'n')
-  " We allow for a stray plural header, msginit adds one.
-endif
-
-" Check that 8bit encoding is used instead of 8-bit
-let cte = search('^"Content-Transfer-Encoding:\s\+8-bit', 'n')
-let ctc = search('^"Content-Type:.*;\s\+\<charset=[iI][sS][oO]_', 'n')
-let ctu = search('^"Content-Type:.*;\s\+\<charset=utf-8', 'n')
-if cte
-  echomsg "Content-Transfer-Encoding should be 8bit instead of 8-bit"
-  " TODO: make this an error
-  " if error == 0
-  "   let error = cte
-  " endif
-elseif ctc
-  echomsg "Content-Type charset should be 'ISO-...' instead of 'ISO_...'"
-  " TODO: make this an error
-  " if error == 0
-  "   let error = ct
-  " endif
-elseif ctu
-  echomsg "Content-Type charset should be 'UTF-8' instead of 'utf-8'"
-  " TODO: make this an error
-  " if error == 0
-  "   let error = ct
-  " endif
-endif
-
-
-if error == 0
-  " If all was OK restore the view.
-  call winrestview(wsv)
-  echomsg "OK"
-else
-  " Put the cursor on the line with the error.
-  exe error
-endif
-
-let &wrapscan = s:save_wrapscan
-unlet s:save_wrapscan
-
-endif
+" vim: shiftwidth=2 sts=2 expandtab
