@@ -1,38 +1,46 @@
-"============================================================================
-"File:        cucumber.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Martin Grenfell <martin.grenfell at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
+" Author: Eddie Lebow https://github.com/elebow
+" Description: Cucumber, a BDD test tool
 
-if exists("g:loaded_syntastic_cucumber_cucumber_checker")
-    finish
-endif
-let g:loaded_syntastic_cucumber_cucumber_checker=1
+function! ale_linters#cucumber#cucumber#GetCommand(buffer) abort
+    let l:features_dir = ale#path#FindNearestDirectory(a:buffer, 'features')
 
-function! SyntaxCheckers_cucumber_cucumber_IsAvailable()
-    return executable('cucumber')
+    if !empty(l:features_dir)
+        let l:features_arg = '-r ' . ale#Escape(l:features_dir)
+    else
+        let l:features_arg = ''
+    endif
+
+    return 'cucumber --dry-run --quiet --strict --format=json '
+    \   . l:features_arg . ' %t'
 endfunction
 
-function! SyntaxCheckers_cucumber_cucumber_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'cucumber',
-                \ 'args': '--dry-run --quiet --strict --format pretty',
-                \ 'subchecker': 'cucumber' })
-    let errorformat =
-        \ '%f:%l:%c:%m,' .
-        \ '%W      %.%# (%m),' .
-        \ '%-Z%f:%l:%.%#,'.
-        \ '%-G%.%#'
+function! ale_linters#cucumber#cucumber#Handle(buffer, lines) abort
+    try
+        let l:json = ale#util#FuzzyJSONDecode(a:lines, {})[0]
+    catch
+        return []
+    endtry
 
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat })
+    let l:output = []
+
+    for l:element in get(l:json, 'elements', [])
+        for l:step in l:element['steps']
+            if l:step['result']['status'] is# 'undefined'
+                call add(l:output, {
+                \   'lnum': l:step['line'],
+                \   'code': 'E',
+                \   'text': 'Undefined step'
+                \})
+            endif
+        endfor
+    endfor
+
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'cucumber',
-    \ 'name': 'cucumber'})
+call ale#linter#Define('cucumber', {
+\   'name': 'cucumber',
+\   'executable': 'cucumber',
+\   'command': function('ale_linters#cucumber#cucumber#GetCommand'),
+\   'callback': 'ale_linters#cucumber#cucumber#Handle'
+\})

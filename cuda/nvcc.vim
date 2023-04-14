@@ -1,67 +1,46 @@
-"============================================================================
-"File:        cuda.vim
-"Description: Syntax checking plugin for syntastic.vim
-"
-"Author:      Hannes Schulz <schulz at ais dot uni-bonn dot de>
-"
-"============================================================================
+" Author: blahgeek <i@blahgeek.com>
+" Description: NVCC linter for cuda files
 
-" in order to also check header files add this to your .vimrc:
-" (this creates an empty .syntastic_dummy.cu file in your source directory)
-"
-"   let g:syntastic_cuda_check_header = 1
+call ale#Set('cuda_nvcc_executable', 'nvcc')
+call ale#Set('cuda_nvcc_options', '-std=c++11')
 
-" By default, nvcc and thus syntastic, defaults to the most basic architecture.
-" This can produce false errors if the developer intends to compile for newer
-" hardware and use newer features, eg. double precision numbers. To pass a
-" specific target arch to nvcc, e.g. add the following to your .vimrc:
-"
-"   let g:syntastic_cuda_arch = "sm_20"
-
-
-if exists("g:loaded_syntastic_cuda_nvcc_checker")
-    finish
-endif
-let g:loaded_syntastic_cuda_nvcc_checker=1
-
-function! SyntaxCheckers_cuda_nvcc_IsAvailable()
-    return executable('nvcc')
+function! ale_linters#cuda#nvcc#GetCommand(buffer) abort
+    return '%e -cuda'
+    \   . ale#Pad(ale#c#IncludeOptions(ale#c#FindLocalHeaderPaths(a:buffer)))
+    \   . ale#Pad(ale#Var(a:buffer, 'cuda_nvcc_options'))
+    \   . ' %s -o ' . g:ale#util#nul_file
 endfunction
 
-function! SyntaxCheckers_cuda_nvcc_GetLocList()
-    if exists('g:syntastic_cuda_arch')
-        let arch_flag = '-arch='.g:syntastic_cuda_arch
-    else
-        let arch_flag = ''
-    endif
-    let makeprg = 'nvcc '.arch_flag.' --cuda -O0 -I . -Xcompiler -fsyntax-only '.shellescape(expand('%')).' -o /dev/null'
-    let errorformat =
-        \ '%*[^"]"%f"%*\D%l: %m,'.
-        \ '"%f"%*\D%l: %m,'.
-        \ '%-G%f:%l: (Each undeclared identifier is reported only once,'.
-        \ '%-G%f:%l: for each function it appears in.),'.
-        \ '%f:%l:%c:%m,'.
-        \ '%f(%l):%m,'.
-        \ '%f:%l:%m,'.
-        \ '"%f"\, line %l%*\D%c%*[^ ] %m,'.
-        \ '%D%*\a[%*\d]: Entering directory `%f'','.
-        \ '%X%*\a[%*\d]: Leaving directory `%f'','.
-        \ '%D%*\a: Entering directory `%f'','.
-        \ '%X%*\a: Leaving directory `%f'','.
-        \ '%DMaking %*\a in %f,'.
-        \ '%f|%l| %m'
+function! ale_linters#cuda#nvcc#HandleNVCCFormat(buffer, lines) abort
+    " Look for lines like the following.
+    "
+    " test.cu(8): error: argument of type "void *" is incompatible with parameter of type "int *"
+    let l:pattern = '\v^([^:\(\)]+):?\(?(\d+)\)?:(\d+)?:?\s*\w*\s*(error|warning): (.+)$'
+    let l:output = []
 
-    if expand('%') =~? '\%(.h\|.hpp\|.cuh\)$'
-        if exists('g:syntastic_cuda_check_header')
-            let makeprg = 'echo > .syntastic_dummy.cu ; nvcc '.arch_flag.' --cuda -O0 -I . .syntastic_dummy.cu -Xcompiler -fsyntax-only -include '.shellescape(expand('%')).' -o /dev/null'
-        else
-            return []
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        let l:item = {
+        \   'lnum': str2nr(l:match[2]),
+        \   'type': l:match[4] =~# 'error' ? 'E' : 'W',
+        \   'text': l:match[5],
+        \   'filename': fnamemodify(l:match[1], ':p'),
+        \}
+
+        if !empty(l:match[3])
+            let l:item.col = str2nr(l:match[3])
         endif
-    endif
 
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat })
+        call add(l:output, l:item)
+    endfor
+
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'cuda',
-    \ 'name': 'nvcc'})
+call ale#linter#Define('cuda', {
+\   'name': 'nvcc',
+\   'output_stream': 'stderr',
+\   'executable': {b -> ale#Var(b, 'cuda_nvcc_executable')},
+\   'command': function('ale_linters#cuda#nvcc#GetCommand'),
+\   'callback': 'ale_linters#cuda#nvcc#HandleNVCCFormat',
+\   'lint_file': 1,
+\})

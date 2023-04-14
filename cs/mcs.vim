@@ -1,35 +1,37 @@
-"============================================================================
-"File:        cs.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Daniel Walker <dwalker@fifo99.com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
+let g:ale_cs_mcs_options = get(g:, 'ale_cs_mcs_options', '')
 
-if exists("g:loaded_syntastic_cs_mcs_checker")
-    finish
-endif
-let g:loaded_syntastic_cs_mcs_checker=1
+function! ale_linters#cs#mcs#GetCommand(buffer) abort
+    let l:options = ale#Var(a:buffer, 'cs_mcs_options')
 
-function! SyntaxCheckers_cs_mcs_IsAvailable()
-    return executable('mcs')
+    return 'mcs -unsafe --parse'
+    \   . (!empty(l:options) ? ' ' . l:options : '')
+    \   . ' %t'
 endfunction
 
-function! SyntaxCheckers_cs_mcs_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'mcs',
-                \ 'args': '--parse',
-                \ 'subchecker': 'mcs' })
-    let errorformat = '%f(%l\,%c): %trror %m'
-    return SyntasticMake({ 'makeprg': makeprg,
-                         \ 'errorformat': errorformat,
-                         \ 'defaults': {'bufnr': bufnr("")} })
+function! ale_linters#cs#mcs#Handle(buffer, lines) abort
+    " Look for lines like the following.
+    "
+    " Tests.cs(12,29): error CSXXXX: ; expected
+    let l:pattern = '^\v(.+\.cs)\((\d+),(\d+)\)\: ([^ ]+) ([^ ]+): (.+)$'
+    let l:output = []
+
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        call add(l:output, {
+        \   'lnum': l:match[2] + 0,
+        \   'col': l:match[3] + 0,
+        \   'type': l:match[4] is# 'error' ? 'E' : 'W',
+        \   'code': l:match[5],
+        \   'text': l:match[6],
+        \})
+    endfor
+
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'cs',
-    \ 'name': 'mcs'})
+call ale#linter#Define('cs',{
+\   'name': 'mcs',
+\   'output_stream': 'stderr',
+\   'executable': 'mcs',
+\   'command': function('ale_linters#cs#mcs#GetCommand'),
+\   'callback': 'ale_linters#cs#mcs#Handle',
+\})
