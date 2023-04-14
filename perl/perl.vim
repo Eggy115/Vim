@@ -1,71 +1,64 @@
-"============================================================================
-"File:        perl.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Anthony Carapetis <anthony.carapetis at gmail dot com>,
-"             Eric Harmon <http://eharmon.net>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
-"
-" In order to add some custom lib directories that should be added to the
-" perl command line you can add those as a comma-separated list to the variable
-" g:syntastic_perl_lib_path.
-"
-"   let g:syntastic_perl_lib_path = './lib,./lib/auto'
-"
-" To use your own perl error output munger script, use the
-" g:syntastic_perl_efm_program option. Any command line parameters should be
-" included in the variable declaration. The program should expect a single
-" parameter; the fully qualified filename of the file to be checked.
-"
-"   let g:syntastic_perl_efm_program = "foo.pl -o -m -g"
-"
+" Author: Vincent Lequertier <https://github.com/SkySymbol>
+" Description: This file adds support for checking perl syntax
 
-if exists("g:loaded_syntastic_perl_perl_checker")
-    finish
-endif
-let g:loaded_syntastic_perl_perl_checker=1
+call ale#Set('perl_perl_executable', 'perl')
+call ale#Set('perl_perl_options', '-c -Mwarnings -Ilib')
 
-if !exists("g:syntastic_perl_interpreter")
-    let g:syntastic_perl_interpreter = "perl"
-endif
-
-function! SyntaxCheckers_perl_perl_IsAvailable()
-    return executable(g:syntastic_perl_interpreter)
+function! ale_linters#perl#perl#GetCommand(buffer) abort
+    return '%e' . ale#Pad(ale#Var(a:buffer, 'perl_perl_options')) . ' %t'
 endfunction
 
-if !exists("g:syntastic_perl_efm_program")
-    let g:syntastic_perl_efm_program =
-        \ g:syntastic_perl_interpreter . ' ' .
-        \ shellescape(expand('<sfile>:p:h') . '/efm_perl.pl') .
-        \ ' -c -w'
-endif
+let s:begin_failed_skip_pattern = '\v' . join([
+\   '^Compilation failed in require',
+\   '^Can''t locate',
+\], '|')
 
-function! SyntaxCheckers_perl_perl_GetLocList()
-    let makeprg = exists("b:syntastic_perl_efm_program") ? b:syntastic_perl_efm_program : g:syntastic_perl_efm_program
-    if exists("g:syntastic_perl_lib_path")
-        let makeprg .= ' -I' . g:syntastic_perl_lib_path
-    endif
-    let makeprg .= ' ' . shellescape(expand('%')) . s:ExtraMakeprgArgs()
-
-    let errorformat =  '%t:%f:%l:%m'
-
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat })
-endfunction
-
-function! s:ExtraMakeprgArgs()
-    let shebang = syntastic#util#parseShebang()
-    if index(shebang['args'], '-T') != -1
-        return ' -Tc'
+function! ale_linters#perl#perl#Handle(buffer, lines) abort
+    if empty(a:lines)
+        return []
     endif
 
-    return ''
+    let l:pattern = '\(..\{-}\) at \(..\{-}\) line \(\d\+\)'
+    let l:output = []
+    let l:basename = expand('#' . a:buffer . ':t')
+
+    let l:type = 'E'
+
+    if a:lines[-1] =~# 'syntax OK'
+        let l:type = 'W'
+    endif
+
+    let l:seen = {}
+
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        let l:line = l:match[3]
+        let l:file = l:match[2]
+        let l:text = l:match[1]
+
+        if ale#path#IsBufferPath(a:buffer, l:file)
+        \ && !has_key(l:seen,l:line)
+        \ && (
+        \   l:text isnot# 'BEGIN failed--compilation aborted'
+        \   || empty(l:output)
+        \   || match(l:output[-1].text, s:begin_failed_skip_pattern) < 0
+        \ )
+            call add(l:output, {
+            \   'lnum': l:line,
+            \   'text': l:text,
+            \   'type': l:type,
+            \})
+
+            let l:seen[l:line] = 1
+        endif
+    endfor
+
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'perl',
-    \ 'name': 'perl'})
+call ale#linter#Define('perl', {
+\   'name': 'perl',
+\   'executable': {b -> ale#Var(b, 'perl_perl_executable')},
+\   'output_stream': 'both',
+\   'command': function('ale_linters#perl#perl#GetCommand'),
+\   'callback': 'ale_linters#perl#perl#Handle',
+\})

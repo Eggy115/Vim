@@ -1,35 +1,44 @@
-"============================================================================
-"File:        matlab.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Jason Graham <jason at the-graham dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
+" Author: awlayton <alex@layton.in>
+" Description: mlint for MATLAB files
 
-if exists("g:loaded_syntastic_matlab_mlint_checker")
-    finish
-endif
-let g:loaded_syntastic_matlab_mlint_checker=1
+call ale#Set('matlab_mlint_executable', 'mlint')
 
-function! SyntaxCheckers_matlab_mlint_IsAvailable()
-    return executable("mlint")
+function! ale_linters#matlab#mlint#Handle(buffer, lines) abort
+    " Matches patterns like the following:
+    "
+    " L 27 (C 1): FNDEF: Terminate statement with semicolon to suppress output.
+    " L 30 (C 13-15): FNDEF: A quoted string is unterminated.
+    let l:pattern = '^L \(\d\+\) (C \([0-9-]\+\)): \([A-Z]\+\): \(.\+\)$'
+    let l:output = []
+
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        let l:lnum = l:match[1] + 0
+        let l:col = l:match[2] + 0
+        let l:code = l:match[3]
+        let l:text = l:match[4]
+
+        " Suppress erroneous warning about filename
+        " TODO: Enable this error when copying filename is supported
+        if l:code is# 'FNDEF'
+            continue
+        endif
+
+        call add(l:output, {
+        \   'bufnr': a:buffer,
+        \   'lnum': l:lnum,
+        \   'col': l:col,
+        \   'text': l:text,
+        \   'type': 'W',
+        \})
+    endfor
+
+    return l:output
 endfunction
 
-function! SyntaxCheckers_matlab_mlint_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-        \ 'exe': 'mlint',
-        \ 'args': '-id $*',
-        \ 'subchecker': 'mlint' })
-    let errorformat =
-        \ 'L %l (C %c): %*[a-zA-Z0-9]: %m,'.
-        \ 'L %l (C %c-%*[0-9]): %*[a-zA-Z0-9]: %m'
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat, 'defaults': {'bufnr': bufnr("")} })
-endfunction
-
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'matlab',
-    \ 'name': 'mlint'})
+call ale#linter#Define('matlab', {
+\   'name': 'mlint',
+\   'executable': {b -> ale#Var(b, 'matlab_mlint_executable')},
+\   'command': '%e -id %t',
+\   'output_stream': 'stderr',
+\   'callback': 'ale_linters#matlab#mlint#Handle',
+\})

@@ -1,47 +1,39 @@
-"============================================================================
-"File:        php.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Martin Grenfell <martin.grenfell at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
+" Author: Spencer Wood <https://github.com/scwood>, Adriaan Zonnenberg <amz@adriaan.xyz>
+" Description: This file adds support for checking PHP with php-cli
 
-if exists("g:loaded_syntastic_php_php_checker")
-    finish
-endif
-let g:loaded_syntastic_php_php_checker=1
+call ale#Set('php_php_executable', 'php')
 
-function! SyntaxCheckers_php_php_IsAvailable()
-    return executable("php")
+function! ale_linters#php#php#Handle(buffer, lines) abort
+    " Matches patterns like the following:
+    "
+    " PHP 7.1<= - Parse error:  syntax error, unexpected ';', expecting ']' in - on line 15
+    " PHP 7.2>= - Parse error:  syntax error, unexpected ';', expecting ']' in Standard input code on line 15
+    let l:pattern = '\v^%(Fatal|Parse) error:\s+(.+unexpected ''(.+)%(expecting.+)@<!''.*|.+) in %(-|Standard input code) on line (\d+)'
+    let l:output = []
+
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        let l:col = empty(l:match[2]) ? 0 : stridx(getline(l:match[3]), l:match[2]) + 1
+
+        let l:obj = {
+        \   'lnum': l:match[3] + 0,
+        \   'col': l:col,
+        \   'text': l:match[1],
+        \}
+
+        if l:col != 0
+            let l:obj.end_col = l:col + strlen(l:match[2]) - 1
+        endif
+
+        call add(l:output, l:obj)
+    endfor
+
+    return l:output
 endfunction
 
-function! SyntaxCheckers_php_php_GetHighlightRegex(item)
-    let unexpected = matchstr(a:item['text'], "unexpected '[^']\\+'")
-    if len(unexpected) < 1
-        return ''
-    endif
-    return '\V'.split(unexpected, "'")[1]
-endfunction
-
-function! SyntaxCheckers_php_php_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'php',
-                \ 'args': '-l -d error_reporting=E_ALL -d display_errors=1 -d log_errors=0 -d xdebug.cli_color=0',
-                \ 'subchecker': 'php' })
-    let errorformat =
-        \ '%-GNo syntax errors detected in%.%#,'.
-        \ 'Parse error: %#syntax %trror\, %m in %f on line %l,'.
-        \ 'Parse %trror: %m in %f on line %l,'.
-        \ 'Fatal %trror: %m in %f on line %l,'.
-        \ '%-G\s%#,'.
-        \ '%-GErrors parsing %.%#'
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat })
-endfunction
-
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'php',
-    \ 'name': 'php'})
+call ale#linter#Define('php', {
+\   'name': 'php',
+\   'executable': {b -> ale#Var(b, 'php_php_executable')},
+\   'output_stream': 'stdout',
+\   'command': '%e -l -d error_reporting=E_ALL -d display_errors=1 -d log_errors=0 --',
+\   'callback': 'ale_linters#php#php#Handle',
+\})

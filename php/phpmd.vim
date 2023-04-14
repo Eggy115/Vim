@@ -1,72 +1,38 @@
-"============================================================================
-"File:        phpmd.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Martin Grenfell <martin.grenfell at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
-"
-" See here for details of phpmd
-"   - phpmd (see http://phpmd.org)
+" Author: medains <https://github.com/medains>, David Sierra <https://github.com/davidsierradz>
+" Description: phpmd for PHP files
 
-if exists("g:loaded_syntastic_php_phpmd_checker")
-    finish
-endif
-let g:loaded_syntastic_php_phpmd_checker=1
+let g:ale_php_phpmd_executable = get(g:, 'ale_php_phpmd_executable', 'phpmd')
 
-function! SyntaxCheckers_php_phpmd_IsAvailable()
-    return executable('phpmd')
+" Set to change the ruleset
+let g:ale_php_phpmd_ruleset = get(g:, 'ale_php_phpmd_ruleset', 'cleancode,codesize,controversial,design,naming,unusedcode')
+
+function! ale_linters#php#phpmd#GetCommand(buffer) abort
+    return '%e %s text'
+    \   . ale#Pad(ale#Var(a:buffer, 'php_phpmd_ruleset'))
+    \   . ' --ignore-violations-on-exit %t'
 endfunction
 
-function! SyntaxCheckers_php_phpmd_GetHighlightRegex(item)
-    let term = matchstr(a:item['text'], '\C^The \S\+ \w\+\(()\)\= \(has\|is not\|utilizes\)')
-    if term != ''
-        return '\V'.substitute(term, '\C^The \S\+ \(\w\+\)\(()\)\= .*', '\1', '')
-    endif
-    let term = matchstr(a:item['text'], '\C^Avoid \(variables with short\|excessively long variable\) names like \S\+\.')
-    if term != ''
-        return '\V'.substitute(term, '\C^Avoid \(variables with short\|excessively long variable\) names like \(\S\+\)\..*', '\2', '')
-    endif
-    let term = matchstr(a:item['text'], '\C^Avoid using short method names like \S\+::\S\+()\.')
-    if term != ''
-        return '\V'.substitute(term, '\C^Avoid using short method names like \S\+::\(\S\+\)()\..*', '\1', '')
-    endif
-    let term = matchstr(a:item['text'], '\C^\S\+ accesses the super-global variable ')
-    if term != ''
-        return '\V'.substitute(term, '\C accesses the super-global variable .*$', '', '')
-    endif
-    let term = matchstr(a:item['text'], '\C^Constant \S\+ should be defined in uppercase')
-    if term != ''
-        return '\V'.substitute(term, '\C^Constant \(\S\+\) should be defined in uppercase', '\1', '')
-    endif
-    let term = matchstr(a:item['text'], "\\C^The '\\S\\+()' method which returns ")
-    if term != ''
-        return '\V'.substitute(term, "\\C^The '\\(\\S\\+\\()' method which returns.*", '\1', '')
-    endif
-    let term = matchstr(a:item['text'], '\C variable \S\+ should begin with ')
-    if term != ''
-        return '\V'.substitute(term, '\C.* variable \(\S\+\) should begin with .*', '\1', '')
-    endif
-    let term = matchstr(a:item['text'], "\\C^Avoid unused \\(private fields\\|local variables\\|private methods\\|parameters\\) such as '\\S\\+'")
-    if term != ''
-        return '\V'.substitute(term, "\\C^Avoid unused \\(private fields\\|local variables\\|private methods\\|parameters\\) such as '\\(\\S\\+\\)'.*", '\2', '')
-    endif
-    return ''
+function! ale_linters#php#phpmd#Handle(buffer, lines) abort
+    " Matches against lines like the following:
+    "
+    " /path/to/some-filename.php:18 message
+    let l:pattern = '^.*:\(\d\+\)\s\+\(.\+\)$'
+    let l:output = []
+
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        call add(l:output, {
+        \   'lnum': l:match[1] + 0,
+        \   'text': l:match[2],
+        \   'type': 'W',
+        \})
+    endfor
+
+    return l:output
 endfunction
 
-function! SyntaxCheckers_php_phpmd_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'phpmd',
-                \ 'post_args': 'text codesize,design,unusedcode,naming',
-                \ 'subchecker': 'phpmd' })
-    let errorformat = '%E%f:%l%\s%#%m'
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat, 'subtype' : 'Style' })
-endfunction
-
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'php',
-    \ 'name': 'phpmd'})
+call ale#linter#Define('php', {
+\   'name': 'phpmd',
+\   'executable': {b -> ale#Var(b, 'php_phpmd_executable')},
+\   'command': function('ale_linters#php#phpmd#GetCommand'),
+\   'callback': 'ale_linters#php#phpmd#Handle',
+\})

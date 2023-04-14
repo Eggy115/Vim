@@ -1,58 +1,61 @@
-"============================================================================
-"File:        perlcritic.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  LCD 47 <lcd047 at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
-"
-" For details about perlcritic see:
-"
-" - http://perlcritic.tigris.org/
-" - https://metacpan.org/module/Perl::Critic
-"
-" Checker options:
-"
-" - g:syntastic_perl_perlcritic_thres (integer; default: 5)
-"   error threshold: policy violations with a severity above this
-"   value are highlighted as errors, the others are warnings
-"
-" - g:syntastic_perl_perlcritic_args (string; default: empty)
-"   command line options to pass to perlcritic
+" Author: Vincent Lequertier <https://github.com/SkySymbol>, Chris Weyl <cweyl@alumni.drew.edu>
+" Description: This file adds support for checking perl with perl critic
 
-if exists("g:loaded_syntastic_perl_perlcritic_checker")
-    finish
-endif
-let g:loaded_syntastic_perl_perlcritic_checker=1
+call ale#Set('perl_perlcritic_executable', 'perlcritic')
+call ale#Set('perl_perlcritic_profile', '.perlcriticrc')
+call ale#Set('perl_perlcritic_options', '')
+call ale#Set('perl_perlcritic_showrules', 0)
 
-if !exists('g:syntastic_perl_perlcritic_thres')
-    let g:syntastic_perl_perlcritic_thres = 5
-endif
+function! ale_linters#perl#perlcritic#GetProfile(buffer) abort
+    " first see if we've been overridden
+    let l:profile = ale#Var(a:buffer, 'perl_perlcritic_profile')
 
-function! SyntaxCheckers_perl_perlcritic_IsAvailable()
-    return executable('perlcritic')
+    if l:profile is? ''
+        return ''
+    endif
+
+    " otherwise, iterate upwards to find it
+    return ale#path#FindNearestFile(a:buffer, l:profile)
 endfunction
 
-function! SyntaxCheckers_perl_perlcritic_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'perlcritic',
-                \ 'post_args': '--quiet --nocolor --verbose "\%s:\%f:\%l:\%c:(\%s) \%m (\%e)\n"',
-                \ 'subchecker': 'perlcritic' })
-    let errorformat='%t:%f:%l:%c:%m'
-    let loclist = SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat, 'subtype': 'Style' })
+function! ale_linters#perl#perlcritic#GetCommand(buffer) abort
+    let l:critic_verbosity = '%l:%c %m\n'
 
-    " change error types according to the prescribed threshold
-    for n in range(len(loclist))
-        let loclist[n]['type'] = loclist[n]['type'] < g:syntastic_perl_perlcritic_thres ? 'W' : 'E'
+    if ale#Var(a:buffer, 'perl_perlcritic_showrules')
+        let l:critic_verbosity = '%l:%c %m [%p]\n'
+    endif
+
+    let l:profile = ale_linters#perl#perlcritic#GetProfile(a:buffer)
+    let l:options = ale#Var(a:buffer, 'perl_perlcritic_options')
+
+    return '%e'
+    \   . ' --verbose ' . ale#Escape(l:critic_verbosity)
+    \   . ' --nocolor'
+    \   . (!empty(l:profile) ? ' --profile ' . ale#Escape(l:profile) : '')
+    \   . ale#Pad(l:options)
+endfunction
+
+
+function! ale_linters#perl#perlcritic#Handle(buffer, lines) abort
+    let l:pattern = '\(\d\+\):\(\d\+\) \(.\+\)'
+    let l:output = []
+
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        call add(l:output, {
+        \   'lnum': l:match[1],
+        \   'col': l:match[2],
+        \   'text': l:match[3],
+        \   'type': 'W'
+        \})
     endfor
 
-    return loclist
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'perl',
-    \ 'name': 'perlcritic'})
+call ale#linter#Define('perl', {
+\   'name': 'perlcritic',
+\   'output_stream': 'stdout',
+\   'executable': {b -> ale#Var(b, 'perl_perlcritic_executable')},
+\   'command': function('ale_linters#perl#perlcritic#GetCommand'),
+\   'callback': 'ale_linters#perl#perlcritic#Handle',
+\})

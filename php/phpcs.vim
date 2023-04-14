@@ -1,38 +1,54 @@
-"============================================================================
-"File:        phpcs.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Martin Grenfell <martin.grenfell at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
-"
-" See here for details of phpcs
-"    - phpcs (see http://pear.php.net/package/PHP_CodeSniffer)
-"
-if exists("g:loaded_syntastic_php_phpcs_checker")
-    finish
-endif
-let g:loaded_syntastic_php_phpcs_checker=1
+" Author: jwilliams108 <https://github.com/jwilliams108>, Eric Stern <https://github.com/firehed>
+" Description: phpcs for PHP files
 
-function! SyntaxCheckers_php_phpcs_IsAvailable()
-    return executable('phpcs')
+let g:ale_php_phpcs_standard = get(g:, 'ale_php_phpcs_standard', '')
+
+call ale#Set('php_phpcs_options', '')
+call ale#Set('php_phpcs_executable', 'phpcs')
+call ale#Set('php_phpcs_use_global', get(g:, 'ale_use_global_executables', 0))
+
+function! ale_linters#php#phpcs#GetCommand(buffer) abort
+    let l:standard = ale#Var(a:buffer, 'php_phpcs_standard')
+    let l:standard_option = !empty(l:standard)
+    \   ? '--standard=' . ale#Escape(l:standard)
+    \   : ''
+
+    return '%e -s --report=emacs --stdin-path=%s'
+    \   . ale#Pad(l:standard_option)
+    \   . ale#Pad(ale#Var(a:buffer, 'php_phpcs_options'))
 endfunction
 
-function! SyntaxCheckers_php_phpcs_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'phpcs',
-                \ 'args': '--report=csv',
-                \ 'subchecker': 'phpcs' })
-    let errorformat =
-        \ '%-GFile\,Line\,Column\,Type\,Message\,Source\,Severity,'.
-        \ '"%f"\,%l\,%c\,%t%*[a-zA-Z]\,"%m"\,%*[a-zA-Z0-9_.-]\,%*[0-9]'
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat, 'subtype': 'Style' })
+function! ale_linters#php#phpcs#Handle(buffer, lines) abort
+    " Matches against lines like the following:
+    "
+    " /path/to/some-filename.php:18:3: error - Line indented incorrectly; expected 4 spaces, found 2 (Generic.WhiteSpace.ScopeIndent.IncorrectExact)
+    let l:pattern = '^.*:\(\d\+\):\(\d\+\): \(.\+\) - \(.\+\) (\(.\+\)).*$'
+    let l:output = []
+
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        let l:code = l:match[5]
+        let l:text = l:match[4] . ' (' . l:code . ')'
+        let l:type = l:match[3]
+
+        call add(l:output, {
+        \   'lnum': l:match[1] + 0,
+        \   'col': l:match[2] + 0,
+        \   'text': l:text,
+        \   'type': l:type is# 'error' ? 'E' : 'W',
+        \   'sub_type': 'style',
+        \})
+    endfor
+
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'php',
-    \ 'name': 'phpcs'})
+call ale#linter#Define('php', {
+\   'name': 'phpcs',
+\   'executable': {b -> ale#path#FindExecutable(b, 'php_phpcs', [
+\       'vendor/bin/phpcs',
+\       'phpcs'
+\   ])},
+\   'cwd': '%s:h',
+\   'command': function('ale_linters#php#phpcs#GetCommand'),
+\   'callback': 'ale_linters#php#phpcs#Handle',
+\})
