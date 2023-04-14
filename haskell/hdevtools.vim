@@ -1,45 +1,20 @@
-"============================================================================
-"File:        hdevtools.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Anthony Carapetis <anthony.carapetis at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
+" Author: rob-b, Takano Akio <tak@anoak.io>
+" Description: hdevtools for Haskell files
 
-if exists("g:loaded_syntastic_haskell_hdevtools_checker")
-    finish
-endif
-let g:loaded_syntastic_haskell_hdevtools_checker=1
+call ale#Set('haskell_hdevtools_executable', 'hdevtools')
+call ale#Set('haskell_hdevtools_options', get(g:, 'hdevtools_options', '-g -Wall'))
 
-function! SyntaxCheckers_haskell_hdevtools_IsAvailable()
-    return executable('hdevtools')
+function! ale_linters#haskell#hdevtools#GetCommand(buffer) abort
+    let l:executable = ale#Var(a:buffer, 'haskell_hdevtools_executable')
+
+    return ale#handlers#haskell_stack#EscapeExecutable(l:executable, 'hdevtools')
+    \ . ' check' . ale#Pad(ale#Var(a:buffer, 'haskell_hdevtools_options'))
+    \ . ' -p %s %t'
 endfunction
 
-function! SyntaxCheckers_haskell_hdevtools_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-        \ 'exe': 'hdevtools check',
-        \ 'args': get(g:, 'hdevtools_options', ''),
-        \ 'subchecker': 'hdevtools' })
-
-    let errorformat= '\%-Z\ %#,'.
-        \ '%W%f:%l:%c:\ Warning:\ %m,'.
-        \ '%E%f:%l:%c:\ %m,'.
-        \ '%E%>%f:%l:%c:,'.
-        \ '%+C\ \ %#%m,'.
-        \ '%W%>%f:%l:%c:,'.
-        \ '%+C\ \ %#%tarning:\ %m,'
-
-    return SyntasticMake({
-        \ 'makeprg': makeprg,
-        \ 'errorformat': errorformat,
-        \ 'postprocess': ['compressWhitespace'] })
-endfunction
-
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'haskell',
-    \ 'name': 'hdevtools'})
-
+call ale#linter#Define('haskell', {
+\   'name': 'hdevtools',
+\   'executable': {b -> ale#Var(b, 'haskell_hdevtools_executable')},
+\   'command': function('ale_linters#haskell#hdevtools#GetCommand'),
+\   'callback': 'ale#handlers#haskell#HandleGHCFormat',
+\})

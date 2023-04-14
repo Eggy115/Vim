@@ -1,110 +1,70 @@
-"============================================================================
-"File:        tidy.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Martin Grenfell <martin.grenfell at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
-"
-" Checker option:
-"
-" - g:syntastic_html_tidy_ignore_errors (list; default: [])
-"   list of errors to ignore
+" Author: KabbAmine <amine.kabb@gmail.com>
+" Description: This file adds support for checking HTML code with tidy.
 
-if exists("g:loaded_syntastic_html_tidy_checker")
-    finish
-endif
-let g:loaded_syntastic_html_tidy_checker = 1
+let g:ale_html_tidy_executable = get(g:, 'ale_html_tidy_executable', 'tidy')
+let g:ale_html_tidy_options = get(g:, 'ale_html_tidy_options', '-q -e -language en')
 
-if !exists('g:syntastic_html_tidy_ignore_errors')
-    let g:syntastic_html_tidy_ignore_errors = []
-endif
+function! ale_linters#html#tidy#GetCommand(buffer) abort
+    " Specify file encoding in options
+    " (Idea taken from https://github.com/scrooloose/syntastic/blob/master/syntax_checkers/html/tidy.vim)
+    let l:file_encoding = get({
+    \   'ascii':        '-ascii',
+    \   'big5':         '-big5',
+    \   'cp1252':       '-win1252',
+    \   'cp850':        '-ibm858',
+    \   'cp932':        '-shiftjis',
+    \   'iso-2022-jp':  '-iso-2022',
+    \   'latin1':       '-latin1',
+    \   'macroman':     '-mac',
+    \   'sjis':         '-shiftjis',
+    \   'utf-16le':     '-utf16le',
+    \   'utf-16':       '-utf16',
+    \   'utf-8':        '-utf8',
+    \ }, &fileencoding, '-utf8')
 
-function! SyntaxCheckers_html_tidy_IsAvailable()
-    return executable('tidy')
+    " On macOS, old tidy (released on 31 Oct 2006) is installed. It does not
+    " consider HTML5 so we should avoid it.
+    let l:executable = ale#Var(a:buffer, 'html_tidy_executable')
+
+    if has('mac') && l:executable is# 'tidy' && exists('*exepath')
+    \  && exepath(l:executable) is# '/usr/bin/tidy'
+        return ''
+    endif
+
+    return printf('%s %s %s -',
+    \   l:executable,
+    \   ale#Var(a:buffer, 'html_tidy_options'),
+    \   l:file_encoding
+    \)
 endfunction
 
-" TODO: join this with xhtml.vim for DRY's sake?
-function! s:TidyEncOptByFenc()
-    let tidy_opts = {
-                \'utf-8'       : '-utf8',
-                \'ascii'       : '-ascii',
-                \'latin1'      : '-latin1',
-                \'iso-2022-jp' : '-iso-2022',
-                \'cp1252'      : '-win1252',
-                \'macroman'    : '-mac',
-                \'utf-16le'    : '-utf16le',
-                \'utf-16'      : '-utf16',
-                \'big5'        : '-big5',
-                \'cp932'       : '-shiftjis',
-                \'sjis'        : '-shiftjis',
-                \'cp850'       : '-ibm858',
-                \}
-    return get(tidy_opts, &fileencoding, '-utf8')
-endfunction
+function! ale_linters#html#tidy#Handle(buffer, lines) abort
+    " Matches patterns lines like the following:
+    " line 7 column 5 - Warning: missing </title> before </head>
+    let l:pattern = '^line \(\d\+\) column \(\d\+\) - \(Warning\|Error\): \(.\+\)$'
+    let l:output = []
 
-let s:ignore_html_errors = [
-                \ "<table> lacks \"summary\" attribute",
-                \ "not approved by W3C",
-                \ "attribute \"placeholder\"",
-                \ "<meta> proprietary attribute \"charset\"",
-                \ "<meta> lacks \"content\" attribute",
-                \ "inserting \"type\" attribute",
-                \ "proprietary attribute \"data-",
-                \ "missing <!DOCTYPE> declaration",
-                \ "inserting implicit <body>",
-                \ "inserting missing 'title' element",
-                \ "attribute \"[+",
-                \ "unescaped & or unknown entity",
-                \ "<input> attribute \"type\" has invalid value \"search\""
-                \ ]
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        let l:line = l:match[1] + 0
+        let l:col = l:match[2] + 0
+        let l:type = l:match[3] is# 'Error' ? 'E' : 'W'
+        let l:text = l:match[4]
 
-function! s:IgnoreErrror(text)
-    for i in s:ignore_html_errors + g:syntastic_html_tidy_ignore_errors
-        if stridx(a:text, i) != -1
-            return 1
-        endif
-    endfor
-    return 0
-endfunction
-
-function s:Args()
-    let args = s:TidyEncOptByFenc() .
-        \ ' --new-blocklevel-tags ' . shellescape('main, section, article, aside, hgroup, header, footer, nav, figure, figcaption') .
-        \ ' --new-inline-tags ' . shellescape('video, audio, source, embed, mark, progress, meter, time, ruby, rt, rp, canvas, command, details, datalist') .
-        \ ' --new-empty-tags ' . shellescape('wbr, keygen') .
-        \ ' -e'
-    return args
-endfunction
-
-function! SyntaxCheckers_html_tidy_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-        \ 'exe': 'tidy',
-        \ 'args': s:Args(),
-        \ 'tail': '2>&1',
-        \ 'subchecker': 'tidy' })
-    let errorformat =
-        \ '%Wline %l column %v - Warning: %m,' .
-        \ '%Eline %l column %v - Error: %m,' .
-        \ '%-G%.%#'
-
-    let loclist = SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat, 'defaults': {'bufnr': bufnr("")} })
-
-    " filter out valid HTML5 from the errors
-    for n in range(len(loclist))
-        if loclist[n]['valid'] && s:IgnoreErrror(loclist[n]['text']) == 1
-            let loclist[n]['valid'] = 0
-        endif
+        call add(l:output, {
+        \   'lnum': l:line,
+        \   'col': l:col,
+        \   'text': l:text,
+        \   'type': l:type,
+        \})
     endfor
 
-    return loclist
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'html',
-    \ 'name': 'tidy'})
-
+call ale#linter#Define('html', {
+\   'name': 'tidy',
+\   'executable': {b -> ale#Var(b, 'html_tidy_executable')},
+\   'output_stream': 'stderr',
+\   'command': function('ale_linters#html#tidy#GetCommand'),
+\   'callback': 'ale_linters#html#tidy#Handle',
+\ })

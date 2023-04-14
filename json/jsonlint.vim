@@ -1,37 +1,43 @@
-"============================================================================
-"File:        jsonlint.vim
-"Description: JSON syntax checker - using jsonlint
-"Maintainer:  Miller Medeiros <contact at millermedeiros dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"============================================================================
+" Author: KabbAmine <amine.kabb@gmail.com>, David Sierra <https://github.com/davidsierradz>
 
-if exists("g:loaded_syntastic_json_jsonlint_checker")
-    finish
-endif
-let g:loaded_syntastic_json_jsonlint_checker=1
+call ale#Set('json_jsonlint_executable', 'jsonlint')
+call ale#Set('json_jsonlint_use_global', get(g:, 'ale_use_global_executables', 0))
 
-function! SyntaxCheckers_json_jsonlint_IsAvailable()
-    return executable('jsonlint')
+function! ale_linters#json#jsonlint#GetExecutable(buffer) abort
+    return ale#path#FindExecutable(a:buffer, 'json_jsonlint', [
+    \   'node_modules/.bin/jsonlint',
+    \   'node_modules/jsonlint/lib/cli.js',
+    \])
 endfunction
 
-function! SyntaxCheckers_json_jsonlint_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'jsonlint',
-                \ 'post_args': '--compact',
-                \ 'subchecker': 'jsonlint' })
-    let errorformat =
-        \ '%ELine %l:%c,'.
-        \ '%Z\\s%#Reason: %m,'.
-        \ '%C%.%#,'.
-        \ '%f: line %l\, col %c\, %m,'.
-        \ '%-G%.%#'
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat, 'defaults': {'bufnr': bufnr('')} })
+function! ale_linters#json#jsonlint#GetCommand(buffer) abort
+    let l:executable = ale_linters#json#jsonlint#GetExecutable(a:buffer)
+
+    return ale#node#Executable(a:buffer, l:executable)
+    \   . ' --compact -'
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'json',
-    \ 'name': 'jsonlint'})
+function! ale_linters#json#jsonlint#Handle(buffer, lines) abort
+    " Matches patterns like the following:
+    " line 2, col 15, found: 'STRING' - expected: 'EOF', '}', ',', ']'.
+    let l:pattern = '^line \(\d\+\), col \(\d*\), \(.\+\)$'
+    let l:output = []
+
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        call add(l:output, {
+        \   'lnum': l:match[1] + 0,
+        \   'col': l:match[2] + 0,
+        \   'text': l:match[3],
+        \})
+    endfor
+
+    return l:output
+endfunction
+
+call ale#linter#Define('json', {
+\   'name': 'jsonlint',
+\   'executable': function('ale_linters#json#jsonlint#GetExecutable'),
+\   'output_stream': 'stderr',
+\   'command': function('ale_linters#json#jsonlint#GetCommand'),
+\   'callback': 'ale_linters#json#jsonlint#Handle',
+\})

@@ -1,54 +1,73 @@
-"============================================================================
-"File:        checkstyle.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Dmitry Geurkov <d.geurkov at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-" Tested with checkstyle 5.5
-"============================================================================
-if exists("g:loaded_syntastic_java_checkstyle_checker")
-    finish
-endif
-let g:loaded_syntastic_java_checkstyle_checker=1
+" Author: Devon Meunier <devon.meunier@gmail.com>
+" Description: checkstyle for Java files
 
-if !exists("g:syntastic_java_checkstyle_classpath")
-    let g:syntastic_java_checkstyle_classpath = 'checkstyle-5.5-all.jar'
-endif
+call ale#Set('java_checkstyle_executable', 'checkstyle')
+call ale#Set('java_checkstyle_config', '/google_checks.xml')
+call ale#Set('java_checkstyle_options', '')
 
-if !exists("g:syntastic_java_checkstyle_conf_file")
-    let g:syntastic_java_checkstyle_conf_file = 'sun_checks.xml'
-endif
+function! ale_linters#java#checkstyle#Handle(buffer, lines) abort
+    let l:output = []
 
-function! SyntaxCheckers_java_checkstyle_IsAvailable()
-    return executable('java')
-endfunction
+    " modern checkstyle versions
+    let l:pattern = '\v\[(WARN|ERROR)\] [a-zA-Z]?:?[^:]+:(\d+):(\d+)?:? (.*) \[(.+)\]'
 
-function! SyntaxCheckers_java_checkstyle_GetLocList()
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        call add(l:output, {
+        \   'type': l:match[1] is? 'WARN' ? 'W' : 'E',
+        \   'sub_type': 'style',
+        \   'lnum': l:match[2] + 0,
+        \   'col': l:match[3] + 0,
+        \   'text': l:match[4],
+        \   'code': l:match[5],
+        \})
+    endfor
 
-    let fname = fnameescape( expand('%:p:h') . '/' . expand('%:t') )
-
-    if has('win32unix')
-        let fname = substitute(system('cygpath -m ' . fname), '\%x00', '', 'g')
+    if !empty(l:output)
+        return l:output
     endif
 
-    let makeprg = syntastic#makeprg#build({
-        \ 'exe': 'java',
-        \ 'args': '-cp ' . g:syntastic_java_checkstyle_classpath .
-        \         ' com.puppycrawl.tools.checkstyle.Main -c ' . g:syntastic_java_checkstyle_conf_file,
-        \ 'fname': fname,
-        \ 'subchecker': 'checkstyle' })
+    " old checkstyle versions
+    let l:pattern = '\v(.+):(\d+): ([^:]+): (.+)$'
 
-    " check style format
-    let errorformat = '%f:%l:%c:\ %m,%f:%l:\ %m'
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        call add(l:output, {
+        \   'type': l:match[3] is? 'warning' ? 'W' : 'E',
+        \   'sub_type': 'style',
+        \   'lnum': l:match[2] + 0,
+        \   'text': l:match[4],
+        \})
+    endfor
 
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat, 'postprocess': ['cygwinRemoveCR'] })
-
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'java',
-    \ 'name': 'checkstyle'})
+function! s:GetConfig(buffer, config) abort
+    if ale#path#IsAbsolute(a:config)
+        return a:config
+    endif
+
+    let s:file = ale#path#FindNearestFile(a:buffer, a:config)
+
+    return !empty(s:file) ? s:file : a:config
+endfunction
+
+function! ale_linters#java#checkstyle#GetCommand(buffer) abort
+    let l:options = ale#Var(a:buffer, 'java_checkstyle_options')
+    let l:config_option = ale#Var(a:buffer, 'java_checkstyle_config')
+    let l:config = l:options !~# '\v(^| )-c ' && !empty(l:config_option)
+    \   ? s:GetConfig(a:buffer, l:config_option)
+    \   : ''
+
+    return '%e'
+    \ . ale#Pad(l:options)
+    \ . (!empty(l:config) ? ' -c ' . ale#Escape(l:config) : '')
+    \ . ' %s'
+endfunction
+
+call ale#linter#Define('java', {
+\   'name': 'checkstyle',
+\   'executable': {b -> ale#Var(b, 'java_checkstyle_executable')},
+\   'command': function('ale_linters#java#checkstyle#GetCommand'),
+\   'callback': 'ale_linters#java#checkstyle#Handle',
+\   'lint_file': 1,
+\})

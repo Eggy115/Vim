@@ -1,58 +1,47 @@
-"============================================================================
-"File:        less.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Julien Blanchard <julien at sideburns dot eu>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
+" Author: zanona <https://github.com/zanona>, w0rp <devw0rp@gmail.com>
+" Description: This file adds support for checking Less code with lessc.
 
-" To send additional options to less use the variable g:syntastic_less_options.
-" The default is
-"   let g:syntastic_less_options = "--no-color"
-"
-" To use less-lint instead of less set the variable
-" g:syntastic_less_use_less_lint.
+call ale#Set('less_lessc_executable', 'lessc')
+call ale#Set('less_lessc_options', '')
+call ale#Set('less_lessc_use_global', get(g:, 'ale_use_global_executables', 0))
 
-if exists("g:loaded_syntastic_less_lessc_checker")
-    finish
-endif
-let g:loaded_syntastic_less_lessc_checker=1
-
-if !exists("g:syntastic_less_options")
-    let g:syntastic_less_options = "--no-color"
-endif
-
-if !exists("g:syntastic_less_use_less_lint")
-    let g:syntastic_less_use_less_lint = 0
-endif
-
-if g:syntastic_less_use_less_lint
-    let s:check_file = 'node ' . expand('<sfile>:p:h') . '/less-lint.js'
-else
-    let s:check_file = 'lessc'
-end
-
-function! SyntaxCheckers_less_lessc_IsAvailable()
-    return executable('lessc')
+function! ale_linters#less#lessc#GetCommand(buffer) abort
+    return '%e --no-color --lint'
+    \   . ' --include-path=' . ale#Escape(expand('#' . a:buffer . ':p:h'))
+    \   . ale#Pad(ale#Var(a:buffer, 'less_lessc_options'))
+    \   . ' -'
 endfunction
 
-function! SyntaxCheckers_less_lessc_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': s:check_file,
-                \ 'args': g:syntastic_less_options,
-                \ 'tail': syntastic#util#DevNull(),
-                \ 'subchecker': 'lessc' })
-    let errorformat = '%m in %f:%l:%c'
+function! ale_linters#less#lessc#Handle(buffer, lines) abort
+    let l:dir = expand('#' . a:buffer . ':p:h')
+    " Matches patterns like the following:
+    let l:pattern = '^\(\w\+\): \(.\{-}\) in \(.\{-}\) on line \(\d\+\), column \(\d\+\):$'
+    let l:output = []
 
-    return SyntasticMake({ 'makeprg': makeprg,
-                         \ 'errorformat': errorformat,
-                         \ 'defaults': {'bufnr': bufnr(""), 'text': "Syntax error"} })
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        let l:item = {
+        \   'lnum': l:match[4] + 0,
+        \   'col': l:match[5] + 0,
+        \   'text': l:match[2],
+        \   'type': 'E',
+        \}
+
+        if l:match[3] isnot# '-'
+            let l:item.filename = ale#path#GetAbsPath(l:dir, l:match[3])
+        endif
+
+        call add(l:output, l:item)
+    endfor
+
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'less',
-    \ 'name': 'lessc'})
+call ale#linter#Define('less', {
+\   'name': 'lessc',
+\   'executable': {b -> ale#path#FindExecutable(b, 'less_lessc', [
+\       'node_modules/.bin/lessc',
+\   ])},
+\   'command': function('ale_linters#less#lessc#GetCommand'),
+\   'callback': 'ale_linters#less#lessc#Handle',
+\   'output_stream': 'stderr',
+\})
