@@ -1,48 +1,65 @@
-"============================================================================
-"File:        xml.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Sebastian Kusnier <sebastian at kusnier dot net>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
+" Author: q12321q <q12321q@gmail.com>
+" Description: This file adds support for checking XML code with xmllint.
 
-if exists("g:loaded_syntastic_xml_xmllint_checker")
-    finish
-endif
-let g:loaded_syntastic_xml_xmllint_checker=1
+" CLI options
+let g:ale_xml_xmllint_executable = get(g:, 'ale_xml_xmllint_executable', 'xmllint')
+let g:ale_xml_xmllint_options = get(g:, 'ale_xml_xmllint_options', '')
 
-" You can use a local installation of DTDs to significantly speed up validation
-" and allow you to validate XML data without network access, see xmlcatalog(1)
-" and http://www.xmlsoft.org/catalog.html for more information.
-
-function! SyntaxCheckers_xml_xmllint_IsAvailable()
-    return executable('xmllint')
+function! ale_linters#xml#xmllint#GetCommand(buffer) abort
+    return '%e'
+    \   . ale#Pad(ale#Var(a:buffer, 'xml_xmllint_options'))
+    \   . ' --noout -'
 endfunction
 
-function! SyntaxCheckers_xml_xmllint_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'xmllint',
-                \ 'args': '--xinclude --noout --postvalid',
-                \ 'subchecker': 'xmllint' })
-    let errorformat=
-        \ '%E%f:%l: error : %m,' .
-        \ '%-G%f:%l: validity error : Validation failed: no DTD found %m,' .
-        \ '%W%f:%l: warning : %m,' .
-        \ '%W%f:%l: validity warning : %m,' .
-        \ '%E%f:%l: validity error : %m,' .
-        \ '%E%f:%l: parser error : %m,' .
-        \ '%E%f:%l: %m,' .
-        \ '%-Z%p^,' .
-        \ '%-G%.%#'
-    let loclist = SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat })
+function! ale_linters#xml#xmllint#Handle(buffer, lines) abort
+    " Matches patterns lines like the following:
+    " file/path:123: error level : error message
+    let l:pattern_message = '\v^([^:]+):(\d+):\s*(([^:]+)\s*:\s+.*)$'
 
-    return loclist
+    " parse column token line like that:
+    " file/path:123: parser error : Opening and ending tag mismatch: foo line 1 and bar
+    " </bar>
+    "       ^
+    let l:pattern_column_token = '\v^\s*\^$'
+
+    let l:output = []
+
+    for l:line in a:lines
+        " Parse error/warning lines
+        let l:match_message = matchlist(l:line, l:pattern_message)
+
+        if !empty(l:match_message)
+            let l:line = l:match_message[2] + 0
+            let l:type = l:match_message[4] =~? 'warning' ? 'W' : 'E'
+            let l:text = l:match_message[3]
+
+            call add(l:output, {
+            \   'lnum': l:line,
+            \   'text': l:text,
+            \   'type': l:type,
+            \})
+
+            continue
+        endif
+
+        " Parse column position
+        let l:match_column_token = matchlist(l:line, l:pattern_column_token)
+
+        if !empty(l:output) && !empty(l:match_column_token)
+            let l:previous = l:output[len(l:output) - 1]
+            let l:previous['col'] = len(l:match_column_token[0])
+
+            continue
+        endif
+    endfor
+
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'xml',
-    \ 'name': 'xmllint'})
+call ale#linter#Define('xml', {
+\   'name': 'xmllint',
+\   'output_stream': 'stderr',
+\   'executable': {b -> ale#Var(b, 'xml_xmllint_executable')},
+\   'command': function('ale_linters#xml#xmllint#GetCommand'),
+\   'callback': 'ale_linters#xml#xmllint#Handle',
+\ })

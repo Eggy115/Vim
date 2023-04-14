@@ -1,61 +1,54 @@
-"============================================================================
-"File:        chktex.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  LCD 47 <lcd047 at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
-"
-" For details about ChkTeX see:
-"
-" http://baruch.ev-en.org/proj/chktex/
-"
-" Checker options:
-"
-" - g:syntastic_tex_chktex_showmsgs (boolean; default: 1)
-"   whether to show informational messages (chktex option "-m");
-"   by default informational messages are shown as warnings
-"
-" - g:syntastic_tex_chktex_args (string; default: empty)
-"   command line options to pass to chktex
+" Author: Andrew Balmos - <andrew@balmos.org>
+" Description: chktex for LaTeX files
 
-if exists("g:loaded_syntastic_tex_chktex_checker")
-    finish
-endif
-let g:loaded_syntastic_tex_chktex_checker = 1
+let g:ale_tex_chktex_executable =
+\   get(g:, 'ale_tex_chktex_executable', 'chktex')
 
-if !exists('g:syntastic_tex_chktex_showmsgs')
-    let g:syntastic_tex_chktex_showmsgs = 1
-endif
+let g:ale_tex_chktex_options =
+\   get(g:, 'ale_tex_chktex_options', '-I')
 
-function! SyntaxCheckers_tex_chktex_IsAvailable()
-    return executable("chktex")
+function! ale_linters#tex#chktex#GetCommand(buffer) abort
+    " Check for optional .chktexrc
+    let l:chktex_config = ale#path#FindNearestFile(
+    \   a:buffer,
+    \   '.chktexrc')
+
+    let l:command = ale#Var(a:buffer, 'tex_chktex_executable')
+    " Avoid bug when used without -p (last warning has gibberish for a filename)
+    let l:command .= ' -v0 -p stdin -q'
+
+    if !empty(l:chktex_config)
+        let l:command .= ' -l ' . ale#Escape(l:chktex_config)
+    endif
+
+    let l:command .= ' ' . ale#Var(a:buffer, 'tex_chktex_options')
+
+    return l:command
 endfunction
 
-function! SyntaxCheckers_tex_chktex_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-        \ 'exe': 'chktex',
-        \ 'post_args': '-q -v1',
-        \ 'subchecker': 'chktex' })
+function! ale_linters#tex#chktex#Handle(buffer, lines) abort
+    " Mattes lines like:
+    "
+    " stdin:499:2:24:Delete this space to maintain correct pagereferences.
+    " stdin:507:81:3:You should enclose the previous parenthesis with `{}'.
+    let l:pattern = '^stdin:\(\d\+\):\(\d\+\):\(\d\+\):\(.\+\)$'
+    let l:output = []
 
-    let errorformat =
-        \ '%EError\ %\\d%\\+\ in\ %f\ line\ %l:\ %m,' .
-        \ '%WWarning\ %\\d%\\+\ in\ %f\ line\ %l:\ %m,' .
-        \ (g:syntastic_tex_chktex_showmsgs ? '%WMessage\ %\\d%\\+\ in\ %f\ line %l:\ %m,' : '') .
-        \ '%+Z%p^,' .
-        \ '%-G%.%#'
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        call add(l:output, {
+        \   'lnum': l:match[1] + 0,
+        \   'col': l:match[2] + 0,
+        \   'text': l:match[4] . ' (' . (l:match[3]+0) . ')',
+        \   'type': 'W',
+        \})
+    endfor
 
-    return SyntasticMake({
-        \ 'makeprg': makeprg,
-        \ 'errorformat': errorformat,
-        \ 'subtype': 'Style',
-        \ 'postprocess': ['sort'] })
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'tex',
-    \ 'name': 'chktex'})
+call ale#linter#Define('tex', {
+\   'name': 'chktex',
+\   'executable': 'chktex',
+\   'command': function('ale_linters#tex#chktex#GetCommand'),
+\   'callback': 'ale_linters#tex#chktex#Handle'
+\})

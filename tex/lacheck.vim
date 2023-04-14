@@ -1,30 +1,43 @@
-"============================================================================
-"File:        tex.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Martin Grenfell <martin.grenfell at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
+" Author: Andrew Balmos - <andrew@balmos.org>
+" Description: lacheck for LaTeX files
 
-if exists("g:loaded_syntastic_tex_lacheck_checker")
-    finish
-endif
-let g:loaded_syntastic_tex_lacheck_checker=1
+call ale#Set('tex_lacheck_executable', 'lacheck')
 
-function! SyntaxCheckers_tex_lacheck_IsAvailable()
-    return executable("lacheck")
+function! ale_linters#tex#lacheck#Handle(buffer, lines) abort
+    " Mattes lines like:
+    "
+    " "book.tex", line 37: possible unwanted space at "{"
+    " "book.tex", line 38: missing `\ ' after "etc."
+    let l:pattern = '^"\(.\+\)", line \(\d\+\): \(.\+\)$'
+    let l:output = []
+
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        " lacheck follows `\input{}` commands. If the cwd is not the same as the
+        " file in the buffer then it will fail to find the inputted items. We do not
+        " want warnings from those items anyway
+        if !empty(matchstr(l:match[3], '^Could not open ".\+"$'))
+            continue
+        endif
+
+        " lacheck follows `\input{}` commands. We are only interested in
+        " reporting errors for the current buffer only.
+        if empty(matchstr(fnamemodify(l:match[1], ':t'), fnamemodify(bufname(a:buffer), ':t')))
+            continue
+        endif
+
+        call add(l:output, {
+        \   'lnum': l:match[2] + 0,
+        \   'text': l:match[3],
+        \   'type': 'W',
+        \})
+    endfor
+
+    return l:output
 endfunction
 
-function! SyntaxCheckers_tex_lacheck_GetLocList()
-    let makeprg = syntastic#makeprg#build({ 'exe': 'lacheck', 'subchecker': 'lacheck' })
-    let errorformat =  '%-G** %f:,%E"%f"\, line %l: %m'
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat })
-endfunction
-
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'tex',
-    \ 'name': 'lacheck'})
+call ale#linter#Define('tex', {
+\   'name': 'lacheck',
+\   'executable': {b -> ale#Var(b, 'tex_lacheck_executable')},
+\   'command': '%e %t',
+\   'callback': 'ale_linters#tex#lacheck#Handle'
+\})

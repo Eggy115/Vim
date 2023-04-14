@@ -1,38 +1,39 @@
-"============================================================================
-"File:        nagelfar.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  James Pickard <james.pickard at gmail dot com>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"Notes:       Requires nagelfar v1.1.12 or later with support for -H option.
-"             See nagelfar homepage http://nagelfar.berlios.de/.
-"
-"============================================================================
-if exists("g:loaded_syntastic_tcl_nagelfar_checker")
-    finish
-endif
-let g:loaded_syntastic_tcl_nagelfar_checker=1
+" Author: Nick James <github@nsjuk.xyz>
+" Description: nagelfar linter for tcl files
 
-function! SyntaxCheckers_tcl_nagelfar_IsAvailable()
-    return executable('nagelfar')
+call ale#Set('tcl_nagelfar_executable', 'nagelfar.tcl')
+call ale#Set('tcl_nagelfar_options', '')
+
+function! ale_linters#tcl#nagelfar#GetCommand(buffer) abort
+    let l:options = ale#Var(a:buffer, 'tcl_nagelfar_options')
+
+    return '%e' . ale#Pad(l:options) . ' %s'
 endfunction
 
-function! SyntaxCheckers_tcl_nagelfar_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'nagelfar',
-                \ 'args': '-H ' . g:syntastic_tcl_nagelfar_conf,
-                \ 'subchecker': 'nagelfar' })
-    let errorformat =
-        \ '%I%f: %l: N %m,'.
-        \ '%f: %l: %t %m,'.
-        \ '%-GChecking file %f'
+function! ale_linters#tcl#nagelfar#Handle(buffer, lines) abort
+    " Matches patterns like the following:
+    " Line   5: W Found constant "bepa" which is also a variable.
+    " Line  13: E Wrong number of arguments (3) to "set"
+    " Line  93: N Close brace not aligned with line 90 (4 0)
+    let l:pattern = '^Line\s\+\([0-9]\+\): \([NEW]\) \(.*\)$'
+    let l:output = []
 
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat })
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        call add(l:output, {
+        \   'lnum': l:match[1] + 0,
+        \   'type': l:match[2] is# 'N' ? 'W' : l:match[2],
+        \   'text': l:match[3],
+        \})
+    endfor
+
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'tcl',
-    \ 'name': 'nagelfar'})
+call ale#linter#Define('tcl', {
+\   'name': 'nagelfar',
+\   'output_stream': 'stdout',
+\   'executable': {b -> ale#Var(b, 'tcl_nagelfar_executable')},
+\   'command': function('ale_linters#tcl#nagelfar#GetCommand'),
+\   'callback': 'ale_linters#tcl#nagelfar#Handle',
+\   'lint_file': 1,
+\})

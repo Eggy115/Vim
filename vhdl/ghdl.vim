@@ -1,33 +1,37 @@
-"============================================================================
-"File:        ghdl.vim
-"Description: Syntax checking plugin for syntastic.vim
-"Maintainer:  Jan Wagner <jaydyou at janidom dot de>
-"License:     This program is free software. It comes without any warranty,
-"             to the extent permitted by applicable law. You can redistribute
-"             it and/or modify it under the terms of the Do What The Fuck You
-"             Want To Public License, Version 2, as published by Sam Hocevar.
-"             See http://sam.zoy.org/wtfpl/COPYING for more details.
-"
-"============================================================================
-if exists("loaded_vhdl_ghdl_syntax_checker")
-    finish
-endif
-let loaded_vhdl_ghdl_syntax_checker = 1
+" Author: John Gentile <johncgentile17@gmail.com>
+" Description: Adds support for `ghdl` VHDL compiler/checker
 
-function! SyntaxCheckers_vhdl_ghdl_IsAvailable()
-    return executable("ghdl")
+call ale#Set('vhdl_ghdl_executable', 'ghdl')
+" Compile w/VHDL-2008 support
+call ale#Set('vhdl_ghdl_options', '--std=08')
+
+function! ale_linters#vhdl#ghdl#GetCommand(buffer) abort
+    return '%e -s ' . ale#Pad(ale#Var(a:buffer, 'vhdl_ghdl_options')) . ' %t'
 endfunction
 
-function! SyntaxCheckers_vhdl_ghdl_GetLocList()
-    let makeprg = syntastic#makeprg#build({
-                \ 'exe': 'ghdl',
-                \ 'args': '-s',
-                \ 'subchecker': 'ghdl' })
-    let errorformat =  '%f:%l:%c: %m'
+function! ale_linters#vhdl#ghdl#Handle(buffer, lines) abort
+    " Look for 'error' lines like the following:
+    " dff_en.vhd:41:5:error: 'begin' is expected instead of 'if'
+    " /path/to/file.vhdl:12:8: no declaration for "i0"
+    let l:pattern = '^[a-zA-Z0-9\-\.\_\/ ]\+:\(\d\+\):\(\d\+\):\(.*\)'
+    let l:output = []
 
-    return SyntasticMake({ 'makeprg': makeprg, 'errorformat': errorformat })
+    for l:match in ale#util#GetMatches(a:lines, l:pattern)
+        call add(l:output, {
+        \   'lnum': l:match[1] + 0,
+        \   'col' : l:match[2] + 0,
+        \   'text': l:match[3],
+        \   'type': 'E',
+        \})
+    endfor
+
+    return l:output
 endfunction
 
-call g:SyntasticRegistry.CreateAndRegisterChecker({
-    \ 'filetype': 'vhdl',
-    \ 'name': 'ghdl'})
+call ale#linter#Define('vhdl', {
+\   'name': 'ghdl',
+\   'output_stream': 'stderr',
+\   'executable': {b -> ale#Var(b, 'vhdl_ghdl_executable')},
+\   'command': function('ale_linters#vhdl#ghdl#GetCommand'),
+\   'callback': 'ale_linters#vhdl#ghdl#Handle',
+\})
